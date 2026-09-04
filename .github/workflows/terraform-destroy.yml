@@ -1,0 +1,104 @@
+name: Terraform destroy
+
+# Destroy can be called by another workflow or deliberately launched by a
+# maintainer. Both paths require an explicit confirmation before deletion.
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: Directory containing the Terraform configuration.
+        required: false
+        default: .
+        type: string
+      terraform-version:
+        description: Terraform CLI version to install.
+        required: false
+        default: 1.9.8
+        type: string
+      init-args:
+        description: Additional Terraform init options.
+        required: false
+        default: -input=false
+        type: string
+      environment:
+        description: GitHub environment used for deployment protection rules.
+        required: false
+        default: terraform
+        type: string
+      confirm_destroy:
+        description: Set true to confirm this destructive operation.
+        required: true
+        type: boolean
+    secrets:
+      terraform-cloud-token:
+        description: Optional Terraform Cloud token for private module access.
+        required: false
+  workflow_dispatch:
+    inputs:
+      working-directory:
+        description: Directory containing the Terraform configuration.
+        required: false
+        default: .
+        type: string
+      terraform-version:
+        description: Terraform CLI version to install.
+        required: false
+        default: 1.9.8
+        type: string
+      init-args:
+        description: Additional Terraform init options.
+        required: false
+        default: -input=false
+        type: string
+      environment:
+        description: GitHub environment used for deployment protection rules.
+        required: false
+        default: terraform
+        type: string
+      confirm_destroy:
+        description: Set true to confirm this destructive operation.
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  destroy:
+    name: Destroy Terraform infrastructure
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    # Share the apply lock because apply and destroy must never mutate state together.
+    concurrency:
+      group: terraform-apply-${{ github.repository }}-${{ inputs.working-directory }}
+      cancel-in-progress: false
+    env:
+      TF_IN_AUTOMATION: "true"
+      TF_INPUT: "0"
+      TF_CLI_ARGS_init: ${{ inputs.init-args }}
+      TF_TOKEN_app_terraform_io: ${{ secrets.terraform-cloud-token }}
+    steps:
+      - name: Confirm destruction
+        run: |
+          if [ "${{ inputs.confirm_destroy }}" != "true" ]; then
+            echo "Destroy was not confirmed. Set confirm_destroy to true."
+            exit 1
+          fi
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ inputs.terraform-version }}
+          terraform_wrapper: false
+
+      - name: Initialize Terraform
+        working-directory: ${{ inputs.working-directory }}
+        run: terraform init
+
+      - name: Destroy Terraform infrastructure
+        working-directory: ${{ inputs.working-directory }}
+        run: terraform destroy -auto-approve -input=false -no-color

@@ -1,0 +1,139 @@
+name: Terraform plan
+
+# This workflow deliberately exposes the detailed plan result as outputs so a
+# caller can decide whether a changed plan needs review or an apply approval.
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: Directory containing the Terraform configuration.
+        required: false
+        default: .
+        type: string
+      terraform-version:
+        description: Terraform CLI version to install.
+        required: false
+        default: 1.9.8
+        type: string
+      init-args:
+        description: Additional Terraform init options.
+        required: false
+        default: -input=false
+        type: string
+      plan-file:
+        description: File name for the binary Terraform plan.
+        required: false
+        default: tfplan
+        type: string
+      artifact-name:
+        description: Artifact name used by the apply workflow.
+        required: false
+        default: terraform-plan
+        type: string
+    secrets:
+      terraform-cloud-token:
+        description: Optional Terraform Cloud token for private module access.
+        required: false
+    outputs:
+      plan-exitcode:
+        description: Terraform detailed exit code (0 for no changes, 2 for changes).
+        value: ${{ jobs.plan.outputs.plan-exitcode }}
+      changes-present:
+        description: Whether Terraform detected infrastructure changes.
+        value: ${{ jobs.plan.outputs.changes-present }}
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  plan:
+    name: Plan Terraform changes
+    runs-on: ubuntu-latest
+    outputs:
+      plan-exitcode: ${{ steps.plan.outputs.exitcode }}
+      changes-present: ${{ steps.plan.outputs.changes-present }}
+    env:
+      TF_IN_AUTOMATION: "true"
+      TF_INPUT: "0"
+      TF_CLI_ARGS_init: ${{ inputs.init-args }}
+      TF_TOKEN_app_terraform_io: ${{ secrets.terraform-cloud-token }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ inputs.terraform-version }}
+          terraform_wrapper: false
+
+      - name: Initialize Terraform
+        working-directory: ${{ inputs.working-directory }}
+        run: terraform init
+
+      # -detailed-exitcode is handled explicitly: exit code 2 is a successful changed plan.
+      - name: Create Terraform plan
+        id: plan
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          PLAN_FILE: ${{ inputs.plan-file }}
+        run: |
+          set +e
+          terraform plan -detailed-exitcode -input=false -no-color -out="$PLAN_FILE"
+          exitcode=$?
+          set -e
+
+          echo "exitcode=$exitcode" >> "$GITHUB_OUTPUT"
+          if [ "$exitcode" -eq 2 ]; then
+            echo "changes-present=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$exitcode" -eq 0 ]; then
+            echo "changes-present=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          exit "$exitcode"
+
+      - name: Export plan JSON and summary
+        if: success()
+        id: summary
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          PLAN_FILE: ${{ inputs.plan-file }}
+        run: |
+          terraform show -json "$PLAN_FILE" > tfplan.json
+          add=$(jq '[.resource_changes[]? | select(.change.actions | index("create"))] | length' tfplan.json)
+          change=$(jq '[.resource_changes[]? | select(.change.actions | index("update"))] | length' tfplan.json)
+          destroy=$(jq '[.resource_changes[]? | select(.change.actions | index("delete"))] | length' tfplan.json)
+          {
+            echo "summary<<EOF"
+            echo "### Terraform plan"
+            echo "| Add | Change | Destroy |"
+            echo "| --- | ------ | ------- |"
+            echo "| $add | $change | $destroy |"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload Terraform plan
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: |
+            ${{ inputs.working-directory }}/${{ inputs.plan-file }}
+            ${{ inputs.working-directory }}/tfplan.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Comment plan on pull request
+        if: ${{ success() && github.event_name == 'pull_request' }}
+        uses: actions/github-script@v7
+        env:
+          BODY: ${{ steps.summary.outputs.summary }}
+        with:
+          script: |
+            github.rest.issues.createComment({
+              owner: context.repo.owner, repo: context.repo.repo,
+              issue_number: context.issue.number, body: process.env.BODY
+            })

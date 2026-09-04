@@ -1,0 +1,32 @@
+name: TFSec scan
+
+on:
+  workflow_call:
+    inputs:
+      working-directory: { required: false, type: string, default: . }
+      soft-fail: { required: false, type: boolean, default: false }
+    secrets: {}
+
+permissions:
+  contents: read
+  pull-requests: write
+  security-events: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aquasecurity/tfsec-action@v1.0.3
+        with:
+          working_directory: ${{ inputs.working-directory }}
+          soft_fail: ${{ inputs.soft-fail }}
+          format: sarif
+          additional_args: --out tfsec.sarif
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with: { sarif_file: tfsec.sarif }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: tfsec-report, path: tfsec.sarif, if-no-files-found: warn }

@@ -1,0 +1,15 @@
+name: Deploy chart
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    uses: raja1417/github-actions-workflows/.github/workflows/helm-deploy.yml@v1
+    with:
+      release-name: web
+      chart-path: deploy/chart
+      namespace: web
+      environment: prod
+    secrets:
+      kubeconfig: ${{ secrets.PRODUCTION_KUBECONFIG }}

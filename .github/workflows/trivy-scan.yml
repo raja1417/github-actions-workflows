@@ -1,0 +1,41 @@
+name: Trivy scan and SBOM
+
+on:
+  workflow_call:
+    inputs:
+      image: { required: true, type: string }
+      severity: { required: false, type: string, default: "CRITICAL,HIGH" }
+      fail-on-vulnerability: { required: false, type: boolean, default: true }
+    secrets: {}
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      # v0.35.0 defaults to Trivy v0.69.3, avoiding the compromised v0.69.4 release.
+      - uses: aquasecurity/trivy-action@0.35.0
+        with:
+          image-ref: ${{ inputs.image }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: ${{ inputs.severity }}
+          exit-code: ${{ inputs.fail-on-vulnerability && '1' || '0' }}
+          version: v0.69.3
+      - uses: aquasecurity/trivy-action@0.35.0
+        with:
+          image-ref: ${{ inputs.image }}
+          format: cyclonedx
+          output: sbom.cdx.json
+          exit-code: "0"
+          version: v0.69.3
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with: { sarif_file: trivy-results.sarif }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: trivy-report-and-sbom, path: "trivy-results.sarif\nsbom.cdx.json", if-no-files-found: warn }

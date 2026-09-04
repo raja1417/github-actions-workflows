@@ -1,0 +1,32 @@
+name: Kubernetes manifest deploy
+
+on:
+  workflow_call:
+    inputs:
+      manifest-path: { required: true, type: string }
+      namespace: { required: false, type: string, default: default }
+      environment: { required: false, type: string, default: dev }
+      wait-timeout: { required: false, type: string, default: 5m }
+    secrets:
+      kubeconfig: { required: true }
+
+permissions: { contents: read }
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-kubectl@v4
+      - name: Configure cluster access
+        env:
+          KUBECONFIG_CONTENT: ${{ secrets.kubeconfig }}
+        run: |
+          umask 077; printf '%s' "$KUBECONFIG_CONTENT" > "$RUNNER_TEMP/kubeconfig"
+          echo "KUBECONFIG=$RUNNER_TEMP/kubeconfig" >> "$GITHUB_ENV"
+      - name: Apply manifests
+        run: kubectl apply --namespace "${{ inputs.namespace }}" --server-side --field-manager=github-actions -f "${{ inputs.manifest-path }}"
+      - name: Wait for deployment rollout
+        run: kubectl rollout status --namespace "${{ inputs.namespace }}" -f "${{ inputs.manifest-path }}" --timeout="${{ inputs.wait-timeout }}"
