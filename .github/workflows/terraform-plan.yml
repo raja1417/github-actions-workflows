@@ -25,6 +25,11 @@ on:
         required: false
         default: tfplan
         type: string
+      artifact-name:
+        description: Artifact name used by the apply workflow.
+        required: false
+        default: terraform-plan
+        type: string
     secrets:
       terraform-cloud-token:
         description: Optional Terraform Cloud token for private module access.
@@ -39,6 +44,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: write
 
 jobs:
   plan:
@@ -88,3 +94,46 @@ jobs:
             exit 0
           fi
           exit "$exitcode"
+
+      - name: Export plan JSON and summary
+        if: success()
+        id: summary
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          PLAN_FILE: ${{ inputs.plan-file }}
+        run: |
+          terraform show -json "$PLAN_FILE" > tfplan.json
+          add=$(jq '[.resource_changes[]? | select(.change.actions | index("create"))] | length' tfplan.json)
+          change=$(jq '[.resource_changes[]? | select(.change.actions | index("update"))] | length' tfplan.json)
+          destroy=$(jq '[.resource_changes[]? | select(.change.actions | index("delete"))] | length' tfplan.json)
+          {
+            echo "summary<<EOF"
+            echo "### Terraform plan"
+            echo "| Add | Change | Destroy |"
+            echo "| --- | ------ | ------- |"
+            echo "| $add | $change | $destroy |"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload Terraform plan
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: |
+            ${{ inputs.working-directory }}/${{ inputs.plan-file }}
+            ${{ inputs.working-directory }}/tfplan.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Comment plan on pull request
+        if: ${{ success() && github.event_name == 'pull_request' }}
+        uses: actions/github-script@v7
+        env:
+          BODY: ${{ steps.summary.outputs.summary }}
+        with:
+          script: |
+            github.rest.issues.createComment({
+              owner: context.repo.owner, repo: context.repo.repo,
+              issue_number: context.issue.number, body: process.env.BODY
+            })

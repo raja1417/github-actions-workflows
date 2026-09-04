@@ -30,6 +30,16 @@ on:
         required: false
         default: false
         type: boolean
+      artifact-name:
+        description: Name of the plan artifact created by terraform-plan.
+        required: false
+        default: terraform-plan
+        type: string
+      plan-file:
+        description: Plan file name supplied by terraform-plan.
+        required: false
+        default: tfplan
+        type: string
     secrets:
       terraform-cloud-token:
         description: Optional Terraform Cloud token for private module access.
@@ -37,6 +47,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: write
 
 jobs:
   apply:
@@ -66,11 +77,12 @@ jobs:
         working-directory: ${{ inputs.working-directory }}
         run: terraform init
 
+      - name: Download approved Terraform plan
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: ${{ inputs.working-directory }}
+
       - name: Apply Terraform changes
         working-directory: ${{ inputs.working-directory }}
-        run: |
-          if [ "${{ inputs.auto-approve }}" = "true" ]; then
-            terraform apply -auto-approve -input=false -no-color
-          else
-            terraform apply -input=false -no-color
-          fi
+        run: terraform apply -input=false -no-color "${{ inputs.plan-file }}"

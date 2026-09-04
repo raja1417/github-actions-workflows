@@ -1,0 +1,32 @@
+name: Helm validate
+
+on:
+  workflow_call:
+    inputs:
+      chart-path: { required: true, type: string }
+      values-file: { required: false, type: string, default: values.yaml }
+      kubernetes-version: { required: false, type: string, default: "1.30.0" }
+    secrets: {}
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - name: Lint chart
+        run: helm lint "${{ inputs.chart-path }}" --values "${{ inputs.chart-path }}/${{ inputs.values-file }}"
+      - name: Render chart
+        run: helm template validation "${{ inputs.chart-path }}" --values "${{ inputs.chart-path }}/${{ inputs.values-file }}" --kube-version "${{ inputs.kubernetes-version }}" > rendered.yaml
+      - uses: instrumenta/kubeval-action@master
+        with:
+          files: rendered.yaml
+          kubernetes-version: ${{ inputs.kubernetes-version }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: helm-rendered-manifest, path: rendered.yaml, if-no-files-found: warn }

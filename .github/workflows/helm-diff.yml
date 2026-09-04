@@ -1,0 +1,35 @@
+name: Helm diff
+
+on:
+  workflow_call:
+    inputs:
+      release-name: { required: true, type: string }
+      chart-path: { required: true, type: string }
+      namespace: { required: true, type: string }
+      values-file: { required: false, type: string, default: values.yaml }
+    secrets:
+      kubeconfig: { required: true }
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  diff:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - name: Configure cluster access
+        env:
+          KUBECONFIG_CONTENT: ${{ secrets.kubeconfig }}
+        run: |
+          umask 077; printf '%s' "$KUBECONFIG_CONTENT" > "$RUNNER_TEMP/kubeconfig"
+          echo "KUBECONFIG=$RUNNER_TEMP/kubeconfig" >> "$GITHUB_ENV"
+      - name: Install Helm diff plugin
+        run: helm plugin install https://github.com/databus23/helm-diff
+      - name: Write diff
+        run: helm diff upgrade --allow-unreleased "${{ inputs.release-name }}" "${{ inputs.chart-path }}" --namespace "${{ inputs.namespace }}" --values "${{ inputs.chart-path }}/${{ inputs.values-file }}" > helm-diff.txt || test $? -eq 2
+      - uses: actions/upload-artifact@v4
+        with: { name: helm-diff, path: helm-diff.txt }

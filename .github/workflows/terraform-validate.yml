@@ -27,6 +27,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: write
 
 jobs:
   validate:
@@ -50,8 +51,12 @@ jobs:
 
       - name: Initialize Terraform
         working-directory: ${{ inputs.working-directory }}
-        run: terraform init
+        run: terraform init -backend=false
 
       - name: Validate Terraform
         working-directory: ${{ inputs.working-directory }}
         run: terraform validate -no-color
+
+      - name: Check Terraform formatting
+        working-directory: ${{ inputs.working-directory }}
+        run: terraform fmt -check -recursive -no-color

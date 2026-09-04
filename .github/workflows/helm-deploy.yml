@@ -1,0 +1,45 @@
+name: Helm deploy
+
+on:
+  workflow_call:
+    inputs:
+      release-name: { required: true, type: string }
+      chart-path: { required: true, type: string }
+      namespace: { required: true, type: string }
+      values-file: { required: false, type: string, default: values.yaml }
+      environment: { required: false, type: string, default: dev }
+      timeout: { required: false, type: string, default: 10m }
+    secrets:
+      kubeconfig: { required: true }
+    outputs:
+      revision:
+        value: ${{ jobs.deploy.outputs.revision }}
+        description: Deployed Helm revision
+
+permissions: { contents: read }
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: ${{ inputs.environment }}
+    outputs:
+      revision: ${{ steps.release.outputs.revision }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - name: Configure cluster access
+        env:
+          KUBECONFIG_CONTENT: ${{ secrets.kubeconfig }}
+        run: |
+          umask 077
+          printf '%s' "$KUBECONFIG_CONTENT" > "$RUNNER_TEMP/kubeconfig"
+          echo "KUBECONFIG=$RUNNER_TEMP/kubeconfig" >> "$GITHUB_ENV"
+      - name: Deploy release
+        run: helm upgrade --install "${{ inputs.release-name }}" "${{ inputs.chart-path }}" --namespace "${{ inputs.namespace }}" --create-namespace --values "${{ inputs.chart-path }}/${{ inputs.values-file }}" --wait --atomic --timeout "${{ inputs.timeout }}"
+      - id: release
+        name: Record deployed revision
+        run: echo "revision=$(helm list -n '${{ inputs.namespace }}' -f '^${{ inputs.release-name }}$' -o json | jq -r '.[0].revision')" >> "$GITHUB_OUTPUT"
+      - name: Show release history
+        if: always()
+        run: helm history "${{ inputs.release-name }}" --namespace "${{ inputs.namespace }}"
