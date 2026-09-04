@@ -1,0 +1,62 @@
+name: Terraform validate
+
+# Reusable validation for Terraform modules. Callers should authenticate their
+# cloud provider before calling this workflow when provider initialization needs it.
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: Directory containing the Terraform configuration.
+        required: false
+        default: .
+        type: string
+      terraform-version:
+        description: Terraform CLI version to install.
+        required: false
+        default: 1.9.8
+        type: string
+      init-args:
+        description: Additional Terraform init options (for example, -backend=false).
+        required: false
+        default: -input=false
+        type: string
+    secrets:
+      terraform-cloud-token:
+        description: Optional Terraform Cloud token for private module access.
+        required: false
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  validate:
+    name: Validate Terraform configuration
+    runs-on: ubuntu-latest
+    env:
+      TF_IN_AUTOMATION: "true"
+      TF_INPUT: "0"
+      TF_CLI_ARGS_init: ${{ inputs.init-args }}
+      TF_TOKEN_app_terraform_io: ${{ secrets.terraform-cloud-token }}
+    steps:
+      # Checking out the caller repository makes this workflow usable from any repository.
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ inputs.terraform-version }}
+          terraform_wrapper: false
+
+      - name: Initialize Terraform
+        working-directory: ${{ inputs.working-directory }}
+        run: terraform init -backend=false
+
+      - name: Validate Terraform
+        working-directory: ${{ inputs.working-directory }}
+        run: terraform validate -no-color
+
+      - name: Check Terraform formatting
+        working-directory: ${{ inputs.working-directory }}
+        run: terraform fmt -check -recursive -no-color
