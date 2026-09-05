@@ -4,7 +4,7 @@ on:
   workflow_call:
     inputs:
       directory: { required: false, type: string, default: . }
-      framework: { required: false, type: string, default: terraform,kubernetes,helm }
+      framework: { required: false, type: string, default: terraform }
       soft-fail: { required: false, type: boolean, default: false }
     secrets: {}
 

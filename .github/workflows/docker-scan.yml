@@ -4,7 +4,7 @@ on:
   workflow_call:
     inputs:
       image: { required: true, type: string }
-      severity: { required: false, type: string, default: CRITICAL,HIGH }
+      severity: { required: false, type: string, default: "CRITICAL,HIGH" }
       fail-on-vulnerability: { required: false, type: boolean, default: true }
     secrets: {}
 
